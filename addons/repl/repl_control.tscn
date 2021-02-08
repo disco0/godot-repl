@@ -50,7 +50,6 @@ visible = false
 margin_left = 1141.0
 margin_right = 1239.0
 margin_bottom = 24.0
-focus_mode = 0
 text = "Import scene"
 __meta__ = {
 "_edit_use_anchors_": false,
@@ -61,7 +60,6 @@ __meta__ = {
 margin_left = 1243.0
 margin_right = 1280.0
 margin_bottom = 24.0
-focus_mode = 0
 text = "Eval"
 __meta__ = {
 "_edit_use_anchors_": false
@@ -75,6 +73,7 @@ mode = 0
 __meta__ = {
 "_edit_use_anchors_": false
 }
+[connection signal="gui_input" from="VBoxContainer/HBoxContainer/input" to="." method="_on_input_gui_input"]
 [connection signal="text_entered" from="VBoxContainer/HBoxContainer/input" to="." method="_on_input_text_entered"]
 [connection signal="pressed" from="VBoxContainer/HBoxContainer/import" to="." method="_on_import_pressed"]
 [connection signal="pressed" from="VBoxContainer/HBoxContainer/eval" to="." method="_on_eval_pressed"]

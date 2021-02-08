@@ -742,16 +742,16 @@ func _on_import_filedialog_file_selected(path):
 	input.text = ''
 	input.grab_focus()
 
-func _input(event):
-	if event.is_action_pressed("ui_up") and input.has_focus():
+func _on_input_gui_input(event):
+	if event.is_action_pressed("ui_up"):
 		hist[hist_index] = input.text
 		hist_index = hist_index-1 if (hist_index > 0) else hist_index
 		input.text = hist[hist_index]
 		input.caret_position = len(input.text)
-		get_tree().set_input_as_handled()
-	if event.is_action_pressed("ui_down") and input.has_focus():
+		accept_event()
+	if event.is_action_pressed("ui_down"):
 		hist[hist_index] = input.text
 		hist_index = hist_index+1 if (hist_index < len(hist)-1) else hist_index
 		input.text = hist[hist_index]
 		input.caret_position = len(input.text)
-		get_tree().set_input_as_handled()
+		accept_event()
