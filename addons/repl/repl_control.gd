@@ -25,8 +25,11 @@ var hist_index = 0;
 
 # Import built-in classes
 # ClassDB.get_class_list() + fix compile/runtime errors (Godot 3.2.3)
+# (this crashes and is incorrect:)
+#for name in ClassDB.get_class_list():
+#	variables[name] = ClassDB.instance(name)
 # Use load() for GDScript classes
-#var variables = {'ClassDB': ClassDB}
+#var variables = {'ClassDB': ClassDB}  # for updating below
 var variables = {
 	'ARVRAnchor': ARVRAnchor,
 	'ARVRCamera': ARVRCamera,
@@ -660,9 +663,6 @@ var variables = {
 
 # Called when the node enters the scene tree for the first time.
 func _ready():
-	# Crash!
-	#for name in ClassDB.get_class_list():
-	#	variables[name] = ClassDB.instance(name)
 	input.grab_focus()
 
 func gd_eval(gd_expr: String) -> Array:
@@ -683,7 +683,7 @@ func gd_eval(gd_expr: String) -> Array:
 		return [false, errstr]
 	return [true, result]
 
-func _on_eval_pressed():
+func eval_input():
 	if input.text == '':
 		output.text += '> \n'
 		return
@@ -691,23 +691,27 @@ func _on_eval_pressed():
 	hist[len(hist)-1] = input.text
 	hist.push_back('')
 	hist_index = len(hist) - 1
-
+	
 	output.text += '> ' + input.text + '\n'
 	
 	var ret = null
 	
+	# Assignment re-implementation (missing in Expression)
+	# TODO: d[x] += 1
 	var var_name = null
-	var regex = RegEx.new()
+	var regex_var = RegEx.new()
 	var result
-	regex.compile("^\\s*(var\\s+)?(?<variable>[a-zA-Z_][a-zA-Z_0-9]*)\\s*?=\\s*?(?<rest>.*)")
-	result = regex.search(input.text)
+	regex_var.compile("^\\s*(var\\s+)?(?<variable>[a-zA-Z_][a-zA-Z_0-9]*)\\s*?=\\s*?(?<rest>.*)")
+	result = regex_var.search(input.text)
 	if result:
 		var_name = result.get_string('variable')
 		input.text = result.get_string('rest')
-
+	
+	# load() support
 	var path = null
-	regex.compile("^load\\(\"(?<path>[^\\\"]*)\"\\)|load\\(\'(?<path>[^\\\"]*)\'\\)")
-	result = regex.search(input.text)
+	var regex_load = RegEx.new()
+	regex_load.compile("^load\\(\"(?<path>[^\\\"]*)\"\\)|load\\(\'(?<path>[^\\\"]*)\'\\)")
+	result = regex_load.search(input.text)
 	if result:
 		path = result.get_string('path')
 		ret = load(path)
@@ -719,14 +723,17 @@ func _on_eval_pressed():
 	if var_name != null and ret[0]:
 		output.text += '* setting variable %s *\n' % var_name
 		variables[var_name] = ret[1]
-
+	
 	output.text += str(ret[1]) + "\n"
 	input.text = ''
-
+	
 	input.grab_focus()
 
+func _on_eval_pressed():
+	eval_input()
+
 func _on_input_text_entered(new_text):
-	_on_eval_pressed()
+	eval_input()
 
 func _on_import_pressed():
 	if input.text.empty():
@@ -743,15 +750,18 @@ func _on_import_filedialog_file_selected(path):
 	input.grab_focus()
 
 func _on_input_gui_input(event):
-	if event.is_action_pressed("ui_up"):
+	if event.is_action_pressed('ui_up'):
 		hist[hist_index] = input.text
 		hist_index = hist_index-1 if (hist_index > 0) else hist_index
 		input.text = hist[hist_index]
 		input.caret_position = len(input.text)
 		accept_event()
-	if event.is_action_pressed("ui_down"):
+	if event.is_action_pressed('ui_down'):
 		hist[hist_index] = input.text
 		hist_index = hist_index+1 if (hist_index < len(hist)-1) else hist_index
 		input.text = hist[hist_index]
 		input.caret_position = len(input.text)
 		accept_event()
+
+# TODO: reset button
+# TODO: i18n
