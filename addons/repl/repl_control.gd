@@ -732,7 +732,7 @@ func eval_input():
 func _on_eval_pressed():
 	eval_input()
 
-func _on_input_text_entered(new_text):
+func _on_input_text_entered(_new_text):
 	eval_input()
 
 func _on_import_pressed():
