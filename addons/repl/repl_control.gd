@@ -14,23 +14,23 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-extends Control
 tool
+extends Control
 
-onready var input = find_node('input')
-onready var output = find_node('output')
+onready var _input = find_node('input')
+onready var _output = find_node('output')
 
-var hist = [''];
-var hist_index = 0;
+var _hist := [''];
+var _hist_index := 0;
 
 # Import built-in classes
 # ClassDB.get_class_list() + fix compile/runtime errors (Godot 3.2.3)
 # (this crashes and is incorrect:)
 #for name in ClassDB.get_class_list():
-#	variables[name] = ClassDB.instance(name)
+#	_variables[name] = ClassDB.instance(name)
 # Use load() for GDScript classes
-#var variables = {'ClassDB': ClassDB}  # for updating below
-var variables = {
+#var _variables = {'ClassDB': ClassDB}  # for updating below
+var _variables = {
 	'ARVRAnchor': ARVRAnchor,
 	'ARVRCamera': ARVRCamera,
 	'ARVRController': ARVRController,
@@ -663,17 +663,17 @@ var variables = {
 
 # Called when the node enters the scene tree for the first time.
 func _ready():
-	input.grab_focus()
+	_input.grab_focus()
 
 func gd_eval(gd_expr: String) -> Array:
 	var errstr = 'Error: '
 	var expression = Expression.new()
-	var error = expression.parse(gd_expr, variables.keys())
+	var error = expression.parse(gd_expr, _variables.keys())
 	if error != OK:
 		errstr += 'invalid expression: '
 		errstr += expression.get_error_text()
 		return [false, errstr]
-	var result = expression.execute(variables.values())
+	var result = expression.execute(_variables.values())
 	if expression.has_execute_failed():
 		errstr += 'execute failed: '
 		var gderr = expression.get_error_text()
@@ -683,14 +683,14 @@ func gd_eval(gd_expr: String) -> Array:
 		return [false, errstr]
 	return [true, result]
 
-func eval_input():
+func gui_eval(input:Node, output:Node) -> void:
 	if input.text == '':
 		output.text += '> \n'
 		return
 	
-	hist[len(hist)-1] = input.text
-	hist.push_back('')
-	hist_index = len(hist) - 1
+	_hist[len(_hist)-1] = input.text
+	_hist.push_back('')
+	_hist_index = len(_hist) - 1
 	
 	output.text += '> ' + input.text + '\n'
 	
@@ -722,45 +722,46 @@ func eval_input():
 	
 	if var_name != null and ret[0]:
 		output.text += '* setting variable %s *\n' % var_name
-		variables[var_name] = ret[1]
+		_variables[var_name] = ret[1]
 	
 	output.text += str(ret[1]) + "\n"
 	input.text = ''
 	
 	input.grab_focus()
 
+
 func _on_eval_pressed():
-	eval_input()
+	gui_eval(_input, _output)
 
 func _on_input_text_entered(_new_text):
-	eval_input()
+	gui_eval(_input, _output)
 
 func _on_import_pressed():
-	if input.text.empty():
-		output.text += 'Please type a variable name.\n'
-		input.grab_focus()
+	if _input.text.empty():
+		_output.text += 'Please type a variable name.\n'
+		_input.grab_focus()
 		return
 	find_node('import_filedialog').popup()
 
 func _on_import_filedialog_file_selected(path):
-	var name = input.text
-	variables[name] = load(path).instance()
-	output.text += '> %s = %s\n' % [name, variables[name]]
-	input.text = ''
-	input.grab_focus()
+	var name = _input.text
+	_variables[name] = load(path).instance()
+	_output.text += '> %s = %s\n' % [name, _variables[name]]
+	_input.text = ''
+	_input.grab_focus()
 
 func _on_input_gui_input(event):
 	if event.is_action_pressed('ui_up'):
-		hist[hist_index] = input.text
-		hist_index = hist_index-1 if (hist_index > 0) else hist_index
-		input.text = hist[hist_index]
-		input.caret_position = len(input.text)
+		_hist[_hist_index] = _input.text
+		_hist_index = _hist_index-1 if (_hist_index > 0) else _hist_index
+		_input.text = _hist[_hist_index]
+		_input.caret_position = len(_input.text)
 		accept_event()
 	if event.is_action_pressed('ui_down'):
-		hist[hist_index] = input.text
-		hist_index = hist_index+1 if (hist_index < len(hist)-1) else hist_index
-		input.text = hist[hist_index]
-		input.caret_position = len(input.text)
+		_hist[_hist_index] = _input.text
+		_hist_index = _hist_index+1 if (_hist_index < len(_hist)-1) else _hist_index
+		_input.text = _hist[_hist_index]
+		_input.caret_position = len(_input.text)
 		accept_event()
 
 # TODO: reset button
