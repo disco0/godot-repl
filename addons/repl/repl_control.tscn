@@ -2,7 +2,7 @@
 
 [ext_resource path="res://addons/repl/repl_control.gd" type="Script" id=1]
 
-[node name="REPL" type="Control"]
+[node name="REPLControl" type="Control"]
 anchor_right = 1.0
 anchor_bottom = 1.0
 rect_min_size = Vector2( 0, 200 )
