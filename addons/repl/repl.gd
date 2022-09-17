@@ -34,7 +34,9 @@ var syntax := preload("./SyntaxColorsNode.gd").new()
 
 
 func _init() -> void:
-	if not Engine.editor_hint: return
+	if not (OS.has_feature("editor") and Engine.editor_hint):
+		queue_free()
+		return
 	name = plugin_node_name
 
 

@@ -1,12 +1,11 @@
-[gd_scene load_steps=10 format=2]
+[gd_scene load_steps=9 format=2]
 
-[ext_resource path="res://addons/repl/SyntaxColorsNode.gd" type="Script" id=1]
-[ext_resource path="res://addons/repl/ui/ReplInputTextEdit.gd" type="Script" id=2]
-[ext_resource path="res://addons/repl/REPLEnvironment.gd" type="Script" id=3]
-[ext_resource path="res://addons/repl/ui/ReplControl.gd" type="Script" id=4]
-[ext_resource path="res://addons/repl/iosevka-term-ss10-regular.ttf" type="DynamicFontData" id=5]
-[ext_resource path="res://addons/repl/mono-font.tres" type="DynamicFont" id=6]
-[ext_resource path="res://addons/repl/custom-theme.tres" type="Theme" id=7]
+[ext_resource path="res://addons/repl/custom-dynamicfont.tres" type="DynamicFont" id=1]
+[ext_resource path="res://addons/repl/custom-theme.tres" type="Theme" id=2]
+[ext_resource path="res://addons/repl/iosevka-term-ss10-regular.ttf" type="DynamicFontData" id=3]
+[ext_resource path="res://addons/repl/ReplControl.gd" type="Script" id=4]
+[ext_resource path="res://addons/repl/REPLEnvironment.gd" type="Script" id=5]
+[ext_resource path="res://addons/repl/ui/ReplInputTextEdit.gd" type="Script" id=6]
 
 [sub_resource type="Theme" id=2]
 LineEdit/colors/clear_button_color = Color( 0.88, 0.88, 0.88, 1 )
@@ -52,7 +51,7 @@ TextEdit/constants/completion_lines = 7
 TextEdit/constants/completion_max_width = 50
 TextEdit/constants/completion_scroll_width = 3
 TextEdit/constants/line_spacing = 4
-TextEdit/fonts/font = ExtResource( 6 )
+TextEdit/fonts/font = ExtResource( 1 )
 TextEdit/icons/fold = null
 TextEdit/icons/folded = null
 TextEdit/icons/space = null
@@ -63,8 +62,8 @@ TextEdit/styles/normal = null
 TextEdit/styles/read_only = null
 
 [sub_resource type="DynamicFont" id=3]
-size = 14
-font_data = ExtResource( 5 )
+size = 32
+font_data = ExtResource( 3 )
 
 [node name="REPLControl" type="Control"]
 anchor_right = 1.0
@@ -72,7 +71,9 @@ anchor_bottom = 1.0
 rect_min_size = Vector2( 0, 200 )
 theme = SubResource( 2 )
 script = ExtResource( 4 )
-use_bb = false
+__meta__ = {
+"_edit_use_anchors_": false
+}
 
 [node name="IOVBox" type="VSplitContainer" parent="."]
 anchor_right = 1.0
@@ -87,7 +88,7 @@ margin_bottom = 648.0
 focus_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
-theme = ExtResource( 7 )
+theme = ExtResource( 2 )
 custom_fonts/mono_font = SubResource( 3 )
 custom_fonts/normal_font = SubResource( 3 )
 bbcode_enabled = true
@@ -112,7 +113,7 @@ __meta__ = {
 }
 
 [node name="input" type="TextEdit" parent="IOVBox/InputHBox"]
-margin_right = 1137.0
+margin_right = 1239.0
 margin_bottom = 60.0
 grow_vertical = 0
 rect_clip_content = true
@@ -123,15 +124,16 @@ syntax_highlighting = true
 highlight_all_occurrences = true
 caret_block_mode = true
 caret_blink = true
-script = ExtResource( 2 )
+script = ExtResource( 6 )
 __meta__ = {
 "_edit_use_anchors_": false
 }
 
 [node name="import" type="Button" parent="IOVBox/InputHBox"]
+visible = false
 margin_left = 1141.0
 margin_right = 1239.0
-margin_bottom = 60.0
+margin_bottom = 51.0
 focus_mode = 0
 text = "Import scene"
 __meta__ = {
@@ -155,19 +157,15 @@ margin_bottom = 302.0
 rect_min_size = Vector2( 150, 52.5 )
 window_title = "Open a File"
 mode = 0
-show_hidden_files = true
 __meta__ = {
 "_edit_use_anchors_": false
 }
 
 [node name="ReplEnvironment" type="Node" parent="."]
-script = ExtResource( 3 )
+script = ExtResource( 5 )
 
-[node name="SyntaxColors" type="Node" parent="."]
-script = ExtResource( 1 )
-
-[connection signal="request_completion" from="IOVBox/InputHBox/input" to="." method="_on_input_request_completion"]
 [connection signal="submit_eval" from="IOVBox/InputHBox/input" to="." method="_on_input_submit_eval"]
+[connection signal="text_changed" from="IOVBox/InputHBox/input" to="." method="_on_input_text_changed"]
 [connection signal="pressed" from="IOVBox/InputHBox/import" to="." method="_on_import_pressed"]
 [connection signal="pressed" from="IOVBox/InputHBox/eval" to="." method="_on_eval_pressed"]
 [connection signal="file_selected" from="import_filedialog" to="." method="_on_import_filedialog_file_selected"]

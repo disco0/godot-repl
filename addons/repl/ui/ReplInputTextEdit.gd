@@ -39,6 +39,7 @@ func reset_position() -> void:
 # @TODO
 # For acquiring symbol_lookup signal symbol parameter
 func resolve_symbol(row: int, col: int) -> String:
+	dprint.write('%d:%d' % [ row, col ], 'resolve_symbol')
 	return ""
 
 
@@ -58,8 +59,13 @@ func update_colors() -> void:
 		dprint.warn('Failed to get syntax color dictionary.', 'update_colors')
 		return
 
+	dprint.write('Adding color regions', 'update_colors')
 	add_color_region('"', '"', syntax.STRING)
 	add_color_region("'", "'", syntax.STRING)
+	add_color_region('$"', '"', syntax.INTRINSIC)
+	add_color_region("$'", "'", syntax.INTRINSIC)
+
+	dprint.write('Adding keywords', 'update_colors')
 	add_keyword_color("\\'", syntax.STRING)
 	add_keyword_color("\\'", syntax.STRING)
 	add_keyword_color("root", syntax.INTRINSIC)
@@ -76,7 +82,9 @@ func update_colors() -> void:
 	add_keyword_color("export", syntax.KEYWORD)
 	add_keyword_color("int", syntax.KEYWORD)
 	add_keyword_color("float", syntax.KEYWORD)
-
+	add_keyword_color("$", syntax.INTRINSIC)
+	for i in 10:
+		add_keyword_color("$%s" % [ i ], syntax.INTRINSIC)
 
 #section handlers
 

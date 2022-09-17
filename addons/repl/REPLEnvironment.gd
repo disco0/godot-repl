@@ -1,9 +1,12 @@
 tool
 class_name ReplEnvironment
 extends Node
-#
-# Introduces additional methods/value bindings in top level repl scope.
-#
+
+
+###
+### Introduces additional methods/value bindings in top level repl scope.
+###
+
 
 signal reinit_required(instance)
 
@@ -36,7 +39,7 @@ var _interface: EditorInterface
 onready var plugin setget set_plugin, get_plugin
 onready var interface: EditorInterface setget, get_interface
 onready var syntax setget, get_syntax
-onready var control = $"../" # REPLControl
+onready var control := $"../"
 
 
 #section Lifecycle
@@ -51,15 +54,23 @@ func _init():
 func _enter_tree() -> void:
 	dprint.write('', 'enter-tree')
 	set_plugin(REPL.get_plugin())
-	control = get_parent()
+	_check_control_initialized()
 
 
 func _ready() -> void:
+	_check_control_initialized()
 	#_debug_dump_members('on:ready')
 	dprint.write('', 'ready')
 
 
 #section Repl Utils
+
+
+func _check_control_initialized() -> void:
+	if is_instance_valid(control):
+		return
+	if is_inside_tree():
+		control = get_parent()
 
 
 func lazy_quote(text: String) -> String:
@@ -68,8 +79,20 @@ func lazy_quote(text: String) -> String:
 	return text
 
 
-func props(obj: Object, filter := "") -> PoolStringArray:
-	var list = obj.get_property_list()
+func props(obj: Object, filter := "", usage_mask = ReplUtil.IGNORED_PROP_USAGE) -> PoolStringArray:
+	var list = [ ]
+	for prop_item in obj.get_property_list():
+		if not 'usage' in prop_item:
+			list.push_back(prop_item)
+			continue
+
+		print('%s: %s' % [ prop_item.name, int2bin(prop_item.usage, 16) ])
+		print('  usage & usage_mask => %s' % [
+			(prop_item['usage'] & usage_mask)
+		])
+		if (prop_item['usage'] & usage_mask) == 0:
+			list.push_back(prop_item)
+
 	var arr := Array(ReplUtil.CollectProp(list, 'name', filter))
 	arr.sort()
 	return PoolStringArray(arr)
@@ -80,15 +103,15 @@ func inspect_prop(prop_dict_arr: Array, prop: String, filter := "", prop_full_na
 	names.sort()
 	var lines := PoolStringArray()
 	lines.push_back(
-			control.colorize('%s:' % [
-				(prop_full_name if prop_full_name.length() > 0 else prop).capitalize() ],
+			control.Colorize('%s:' % [
+					(prop_full_name if prop_full_name.length() > 0 else prop).capitalize() ],
 			control.SYNTAX.TYPE))
 	for name in names:
 		lines.push_back(
-			' '.repeat(INSPECT_ENTRY_INDENT_LEVEL) \
-			+ control.colorize("-", control.SYNTAX.PUNCT) \
-			+ " " \
-			+ control.colorize(lazy_quote(name), control.SYNTAX.STRING))
+				' '.repeat(INSPECT_ENTRY_INDENT_LEVEL)
+				+ control.Colorize("-", control.SYNTAX.PUNCT)
+				+ " "
+				+ control.Colorize(lazy_quote(name), control.SYNTAX.STRING))
 	control.output_line_raw(lines.join("\n"))
 	control.clear_repl_input()
 
@@ -130,7 +153,11 @@ func p(obj, filter := "") -> void:
 				control.write_error('Value is invalid instance.')
 				return
 
-			inspect_prop(obj.get_property_list(), "name", filter, "Properties")
+			inspect_prop(
+					ReplUtil.PropFilterNonRegion(obj.get_property_list()),
+					"name",
+					filter,
+					"Properties")
 
 			return
 
@@ -155,14 +182,13 @@ func copy(content) -> void:
 	OS.set_clipboard(content if typeof(content) == TYPE_STRING else String(content))
 
 
-func paste() -> String:
-	return OS.get_clipboard()
+func paste() -> String: return OS.get_clipboard()
 
 
 func inspect(obj) -> void:
 	if typeof(obj) != TYPE_OBJECT:
 		# Get control and display error
-		control.output_line_raw(control.colorize("Can only inspect Objects.", control.SYNTAX.ERROR))
+		control.output_line_raw(control.Colorize("Can only inspect Objects.", control.SYNTAX.ERROR))
 		return
 	get_interface().inspect_object(obj)
 
@@ -188,6 +214,10 @@ func find(path, recurse := true, owned := false, base: Node = get_root()) -> Nod
 	return base.find_node(path, recurse, owned)
 
 
+func stringify(value, indent = 4, sort = true) -> String:
+	return JSON.print(value, indent, sort)
+
+
 #section setget
 
 
@@ -199,7 +229,7 @@ func set_plugin(plugin_instance: EditorPlugin) -> void:
 		syntax = _plugin.syntax
 		_debug_dump_members('set:plugin')
 	else:
-		dprint.write('Passed plugin instance is not valid.', 'set:plugin')
+		dprint.warn('Passed plugin instance is not valid.', 'set:plugin')
 
 
 func get_plugin() -> EditorPlugin:
@@ -272,20 +302,100 @@ func get_plugin_singletons() -> Array:
 
 	return singletons
 
+
 func get_plugin_singletons_dict() -> Dictionary:
+	dprint.write('', 'get_plugin_singletons_dict')
 	var count := get_root().get_child_count()
 	if count <= 1:
 		return { }
 
-	var singletons := { }
-	var start := 1
-	for idx in range(start, count):
-		var child := get_root().get_child(idx)
-		singletons[child.name]  = child
+	var singletons := Dictionary()
+	var idx := -1
+	for child in get_root().get_children():
+		idx += 1
+		if not is_instance_valid(child):
+			dprint.warn('Invalid root child index %2d' % [ idx ])
+		dprint.write(' [%02d] %s: %s' % [ idx, child.name, child ], 'get_plugin_singletons_dict')
+		singletons[child.name] = child
 
 	return singletons
 
 
+const REPL_SCRIPT_INSTANCE_GROUP = 'repl-script-instance'
+const RUN_TARGET_METHOD_NAME := 'run'
+var last_ran
+
+func _prepare_run_instance() -> void:
+	if not is_instance_valid(last_ran):
+		last_ran = null
+		return
+
+	if (last_ran as Node) != null:
+		if last_ran.is_inside_tree():
+			dprint.write('Removing last script instance from tree.', '_prepare_run')
+			last_ran.get_parent().remove_child(last_ran)
+
+		last_ran.queue_free()
+
+	last_ran = null
+
+func _store_run_instance(instance) -> void:
+	if not is_instance_valid(instance): return
+
+	last_ran = instance
+
+	if not instance is Node: return
+
+	(instance as Node).add_to_group(REPL_SCRIPT_INSTANCE_GROUP)
+	REPL.add_child(instance)
+
+
+func reset_run() -> void:
+	var base := REPL as Node
+	for node in base.get_children():
+		if (node as Node).is_in_group(REPL_SCRIPT_INSTANCE_GROUP):
+			base.remove_child(node)
+
+func run(script_path: String = "") -> void:
+	# TODO: Picker on fallback or exists check fail, also in general
+	if script_path.empty():
+		control.write_error('Empty script_path argument.')
+		return
+	if not ResourceLoader.exists(script_path, 'GDScript'):
+		control.write_error('Path does not resolve to script: <%s>' % [ script_path ])
+		return
+
+	var script_res := ResourceLoader.load(script_path, "GDScript", true) as GDScript
+	if not script_res.is_tool():
+		control.write_error('Non-tool script: <%s>' % [ script_path ])
+		return
+	var method_info_list := script_res.get_script_method_list()
+	if not ReplUtil.HasItemWithProp(method_info_list, 'name', RUN_TARGET_METHOD_NAME):
+		var method_list := ReplUtil.CollectProp(method_info_list, 'name')
+		var method_list_indent = "\n\t - "
+		control.write_error('Script does not contain %s method.\nFound Methods:%s' % [
+				RUN_TARGET_METHOD_NAME,
+				method_list_indent + PoolStringArray(method_list).join(method_list_indent)
+		])
+		return
+
+	# TODO: Add API to pass in env to init?
+	var instance = script_res.new()
+
+	if not is_instance_valid(instance):
+		control.write_error('Returned invalid instance from .new()' % [ RUN_TARGET_METHOD_NAME ])
+		return
+
+	control.output_line_raw(
+			control.Colorize('# Running %s' % [ script_path ], control.SYNTAX.COMMENT))
+
+	instance.call(RUN_TARGET_METHOD_NAME)
+
+	control.output_line_raw(
+			control.Colorize('# %s call complete' % [ RUN_TARGET_METHOD_NAME ],
+							 control.SYNTAX.COMMENT))
+
+	_store_run_instance(instance)
 
 #section etc
 

@@ -25,7 +25,7 @@ export (bool) var _reload = false setget _on_reload
 onready var syntax_node := $SyntaxColors
 onready var input: ReplInputTextEdit = $IOVBox/InputHBox/input as TextEdit
 onready var output: RichTextLabel = $IOVBox/output
-onready var env := $ReplEnvironment as ReplEnvironment
+onready var env := $ReplEnvironment
 
 var dprint := preload('../util/logger.gd').Builder.get_for(self)
 var syntax := preload('../SyntaxColorsNode.gd').new()
@@ -172,7 +172,7 @@ func output_line(text: String) -> void:
 
 
 func write_error(msg: String) -> void:
-	output_line_raw(colorize(fmt.escape(msg), SYNTAX.ERROR))
+	output_line_raw(Colorize(fmt.escape(msg), SYNTAX.ERROR))
 
 
 #section input
@@ -237,11 +237,11 @@ func eval() -> void:
 
 	elif dedented.begins_with("!clear"):
 		output_clear_buffer()
-		output_line_raw(colorize('Cleared REPL', TextFG.REPL_LOG))
+		output_line_raw(Colorize('Cleared REPL', TextFG.REPL_LOG))
 		return
 
 	if dedented.begins_with("?bb"):
-		output_line_raw(colorize(
+		output_line_raw(Colorize(
 				fmt.escape('[BBCode mode %sabled]' %
 						[ 'en' if output.bbcode_enabled else 'dis' ]),
 				TextFG.REPL_LOG))
@@ -250,13 +250,13 @@ func eval() -> void:
 		return
 
 	if dedented == "?":
-		output_line_raw(colorize(env.help_output, TextFG.REPL_LOG))
+		output_line_raw(Colorize(env.help_output, TextFG.REPL_LOG))
 		clear_repl_input()
 		input.reset_position()
 		return
 
 	if dedented == '':
-		output_line_raw(colorize(' > ', TextFG.CMD_LOG_PREFIX))
+		output_line_raw(Colorize(' > ', TextFG.CMD_LOG_PREFIX))
 		clear_repl_input()
 		input.reset_position()
 		return
@@ -266,38 +266,72 @@ func eval() -> void:
 	hist_index = hist.size() - 1
 
 	output_line_raw('\n'
-		+ colorize(' > ', TextFG.CMD_LOG_PREFIX)
-		+ colorize(fmt.escape(raw.rstrip('\n\t ')), TextFG.CMD_LOG))
+		+ Colorize(' > ', TextFG.CMD_LOG_PREFIX)
+		+ Colorize(fmt.escape(raw.rstrip('\n\t ')), TextFG.CMD_LOG))
 
 	var var_name = null
 	var ret = null
 	var regex = RegEx.new()
 	var result: RegExMatch
-	regex.compile("^\\s*(var\\s+)?(?<variable>[a-zA-Z_][a-zA-Z_0-9]*)\\s*?=\\s*?(?<rest>.*)")
-	result = regex.search(input.text)
+	#regex.compile(EXPR_REGEX.VAR.PATTERN)
+	#result = regex.search(input.text)
+	result = eval_regex(input.text, EXPR_REGEX_TYPE.VAR)
 	if result:
 		var_name = result.get_string('variable')
 		input.text = result.get_string('rest')
+		dprint.write('Parsed var statement lhs: <%s>' % [ var_name ], 'eval')
+		dprint.write('Parsed var statement rhs: <%s>' % [ input.text ], 'eval')
 
+	dprint.write('Searching for load call in <%s>' % [ input.text ], 'eval')
 	var path = null
-	regex.compile("^[\\s]*(load[\\(])[\\s]*(['\"])(?<path>(?:[^\\n'\"\\\\]+|[\\\\]\\2|(?!\\2).)+)(\\2)[\\s]*([\\)])")
-	result = regex.search(input.text)
+	#regex.compile(EXPR_REGEX.LOAD.PATTERN)
+	result = eval_regex(input.text, EXPR_REGEX_TYPE.LOAD)  # regex.search(input.text)
 	if result:
-		path = result.get_string('path')
-		ret = load(path)
-		ret = [true, ret]
+		dprint.write('Load expression matched.', 'eval')
+		var groups = result.get_names()
+		match groups:
+			# $0
+			{ "dollar_alias": var index, ..}:
+				dprint.write('Matched $0 alias in load')
+				var current_dock_file_path := interface.get_current_path()
+				if not ResourceLoader.exists(current_dock_file_path):
+					#output_line_raw(Colorize(
+					write_error('File matched in dock by token %s is not loadable: <%s>'
+										% [ result.get_string(index), current_dock_file_path ])
+					# , TextFG.ERR))
+				path = current_dock_file_path
+
+			{ "path": var index, .. }:
+				var path_string: String = result.get_string(index)
+				dprint.write('Matched path literal in load')
+				if not ResourceLoader.exists(path_string):
+					#output_line_raw(Colorize(
+					write_error('Literal path string is not loadable: <%s>'
+										% [ path_string ])
+					# , TextFG.ERR))
+
+				path = path_string
+
+			_ :
+				dprint.write('Reached end of load parse regex.', 'eval')
+				dprint.write('Matched groups: %s' % [ JSON.print(groups, '  ', true) ], 'eval')
+				path = null
+
+		if path:
+			ret = load(path)
+			ret = [true, ret]
 
 	if ret == null:
 		ret = gd_eval(input.text)
 
 	if var_name != null and ret[0]:
-		output_line_raw(colorize('* setting variable %s *' % [ var_name ], TextFG.CMD_LOG_PREFIX))
+		output_line_raw(Colorize('* setting variable %s *' % [ var_name ], TextFG.CMD_LOG_PREFIX))
 		variables[var_name] = ret[1]
 		# Clear input after assign
 
 	# Rough check for error message
 	if typeof(ret[1]) == TYPE_STRING and ret[1].begins_with('Error: '):
-		output_line_raw(colorize(ret[1], TextFG.ERR))
+		output_line_raw(Colorize(ret[1], TextFG.ERR))
 	# Skip top level null returns
 	elif typeof(ret[1]) == TYPE_NIL:
 		pass
@@ -308,12 +342,43 @@ func eval() -> void:
 	input.reset_position()
 
 
+enum EXPR_REGEX_TYPE { LOAD, VAR }
+const EXPR_REGEX := {
+	EXPR_REGEX_TYPE.LOAD: {
+		PATTERN = "^[\\s]*(load[\\(])[\\s]*(?<params>(?<dollar_alias>[$][\\d]+)|(['\"])(?<path>(?:[^\\n'\"\\\\]+|[\\\\]\\4|(?!\\4).)+)(\\4))[\\s]*([\\)])"
+	},
+	EXPR_REGEX_TYPE.VAR: {
+		PATTERN = "^\\s*(var\\s+)?(?<variable>[a-zA-Z_][a-zA-Z_0-9]*)\\s*?=\\s*?(?<rest>.*)"
+	}
+}
+
+var _regex_cache := { }
+# Takes an enum key in EXPR_REGEX
+func eval_regex(string: String, pattern_type: int, uncached := false) -> RegExMatch:
+	if pattern_type in EXPR_REGEX:
+		# (Re)initialization check
+		if uncached or not (pattern_type in _regex_cache):
+			var regex := RegEx.new()
+			var pattern: String = EXPR_REGEX[pattern_type].PATTERN
+
+			if regex.compile(pattern) != OK:
+				dprint.error('Failed to compile regex source: /%s/' % [ pattern ], 'eval_regex')
+				return null
+
+			_regex_cache[pattern_type] = regex
+
+		return (_regex_cache[pattern_type] as RegEx).search(string)
+
+	dprint.error('Unknown pattern enum index: %d' % [ pattern_type ], 'eval_regex')
+	return null
+
+
 func repl_full_init(clear_buf := false) -> void:
 	build_syntax_colors(true)
 	# If buffer clear requested do it _before_ info message
 	if clear_buf == true:
 		output_clear_buffer()
-	output_line_raw(colorize('Reinitialzing Environment', TextFG.REPL_LOG))
+	output_line_raw(Colorize('Reinitialzing Environment', TextFG.REPL_LOG))
 	clear_repl_input()
 	_env_rebuild()
 	input.reset_position()
@@ -326,7 +391,7 @@ func repl_full_init(clear_buf := false) -> void:
 # `color` accepts any of the following:
 #   - Color object
 #   - HTML hex format string
-static func colorize(text, color, escape := false) -> String:
+static func Colorize(text, color, escape := false) -> String:
 	return '%s%s[/color]' % [ BBCodeText.ColorTag(color), text ]
 
 
@@ -424,16 +489,19 @@ func inc_indent(indent: String) -> String:
 	return indent + PRETTY_PRINT.INDENT
 
 
-# TODO: Originally was going to show both as fg and bg color, only fg for no
-func color_sample_text(color: Color, delim_color = null, text := 'sample', delim := PRETTY_PRINT.COLOR_PREVIEW_DELIM, sep :=  "") -> String:
+func color_sample_text(color: Color,
+					   delim_color = null,
+					   text := 'sample',
+					   delim := PRETTY_PRINT.COLOR_PREVIEW_DELIM,
+					   sep :=  "") -> String:
 	if not delim_color or typeof(delim_color) != TYPE_COLOR:
 		delim_color = SYNTAX.COMMENT
 		delim_color.a *= 0.4
 
 	return PoolStringArray([
-		colorize(fmt.escape(delim[0]), delim_color),
-			colorize(fmt.escape(text), color),
-		colorize(fmt.escape(delim[1]), delim_color),
+			Colorize(fmt.escape(delim[0]), delim_color),
+				Colorize(fmt.escape(text), color),
+			Colorize(fmt.escape(delim[1]), delim_color),
 	]).join(sep)
 
 
@@ -442,8 +510,8 @@ func pretty_print_color(value, depth := 0, indent := "") -> PoolStringArray:
 	var values := ("%s" % [ value ]).split_floats(',', false)
 
 	out.append_array(PoolStringArray([
-		colorize('Color', SYNTAX.INTRINSIC),
-		colorize('(', SYNTAX.PUNCT),
+			Colorize('Color', SYNTAX.INTRINSIC),
+			Colorize('(', SYNTAX.PUNCT),
 	]))
 
 	# Place preview inside of left paren
@@ -451,38 +519,37 @@ func pretty_print_color(value, depth := 0, indent := "") -> PoolStringArray:
 		out.push_back(color_sample_text(value) + " ")
 
 	var styled_values := PoolStringArray()
-	var sep := colorize(',', SYNTAX.PUNCT)
+	var sep := Colorize(',', SYNTAX.PUNCT)
 	for unstyled in values:
-		styled_values.push_back(colorize(String(unstyled), SYNTAX.NUMERIC))
+		styled_values.push_back(Colorize(String(unstyled), SYNTAX.NUMERIC))
 
 	out.push_back(styled_values.join(sep + ' '))
-	out.push_back(colorize(')', SYNTAX.PUNCT))
+	out.push_back(Colorize(')', SYNTAX.PUNCT))
 
 	return out
 
 
 func pretty_print_vec(value, depth := 0, indent := "") -> PoolStringArray:
-	var out := PoolStringArray([])
+	var out := PoolStringArray([
+			Colorize(ReplUtil.TypeStringOf(value), SYNTAX.INTRINSIC),
+			Colorize('(', SYNTAX.PUNCT),
+	])
+
 	var values := ReplUtil.StripParens(str(value)).split_floats(',', false)
 
-	out.append_array(PoolStringArray([
-		colorize(ReplUtil.TypeStringOf(value), SYNTAX.INTRINSIC),
-		colorize('(', SYNTAX.PUNCT),
-	]))
-
 	var styled_values := PoolStringArray()
-	var sep := colorize(',', SYNTAX.PUNCT)
+	var sep := Colorize(',', SYNTAX.PUNCT)
 	for unstyled in values:
-		styled_values.push_back(colorize(String(unstyled), SYNTAX.NUMERIC))
+		styled_values.push_back(Colorize(str(unstyled), SYNTAX.NUMERIC))
 
 	out.push_back(styled_values.join(sep + ' '))
-	out.push_back(colorize(')', SYNTAX.PUNCT))
+	out.push_back(Colorize(')', SYNTAX.PUNCT))
 
 	return out
 
 
 func pool_tag(string: String = "") -> String:
-	return colorize(fmt.escape('<pool>'), SYNTAX.TYPE) + string
+	return Colorize(fmt.escape('<pool>'), SYNTAX.TYPE) + string
 
 
 func pretty_print_arraylike(value, depth := 0, indent := "") -> PoolStringArray:
@@ -493,7 +560,7 @@ func pretty_print_arraylike(value, depth := 0, indent := "") -> PoolStringArray:
 	if length == 0:
 		if is_pool:
 			out.push_back(pool_tag())
-		out.push_back(colorize('[ ]', SYNTAX.PUNCT))
+		out.push_back(Colorize('[ ]', SYNTAX.PUNCT))
 		return out
 
 	var prefix := inc_indent(indent)
@@ -505,20 +572,16 @@ func pretty_print_arraylike(value, depth := 0, indent := "") -> PoolStringArray:
 
 	if depth > PRETTY_PRINT.DEPTH_LIMIT:
 		out.append_array([
-			pool_tag(prefix) if is_pool else prefix,
-			colorize(ReplUtil.TypeStringOf(value), SYNTAX.INTRINSIC),
-			colorize('[', SYNTAX.PUNCT),
-				colorize(String(length), SYNTAX.NUMERIC),
-			colorize(']', SYNTAX.PUNCT)
+				pool_tag(prefix) if is_pool else prefix,
+				Colorize(ReplUtil.TypeStringOf(value), SYNTAX.INTRINSIC),
+				Colorize('[', SYNTAX.PUNCT),
+					Colorize(str(length), SYNTAX.NUMERIC),
+				Colorize(']', SYNTAX.PUNCT)
 		])
 		return out
 
 	out.push_back(pool_tag(indent) if is_pool else indent)
-
-	out.push_back("%s%s" % [
-				colorize('[', SYNTAX.PUNCT),
-				postfix
-			])
+	out.push_back("%s%s" % [ Colorize('[', SYNTAX.PUNCT), postfix ])
 
 	for i in length:
 		# Push indent + content
@@ -526,62 +589,53 @@ func pretty_print_arraylike(value, depth := 0, indent := "") -> PoolStringArray:
 		#        probably should do a length check on strings or do it here
 		out.push_back("%s%s" % [
 				prefix,
-				pretty_print_value(value[i], depth + 1, prefix).lstrip('\t\n ')
-			])
+				pretty_print_value(value[i], depth + 1, prefix).lstrip('\t\n ') ])
 
 		# On limit reached
 		if i >= PRETTY_PRINT.MAX_ELS and length >= i:
 			# Push comma, and etc. symbol
 			out.push_back("%s%s%s%s\n" % [
-					colorize(',', SYNTAX.PUNCT),
+					Colorize(',', SYNTAX.PUNCT),
 					postfix, prefix,
-					colorize(PRETTY_PRINT.FMT.X_MORE % [ length - PRETTY_PRINT.MAX_ELS ], SYNTAX.COMMENT),
+					Colorize(PRETTY_PRINT.FMT.X_MORE % [ length - PRETTY_PRINT.MAX_ELS ], SYNTAX.COMMENT),
 				])
 			break
 		elif PRETTY_PRINT.MULTILINE:
 			out.push_back("%s%s" % [
-					colorize(',', SYNTAX.PUNCT),
-					postfix if i <= length else "" # prefix
-				])
+					Colorize(',', SYNTAX.PUNCT),
+					postfix if i <= length else "" ])
 
 	out.push_back("%s%s" % [
 			indent,
-			colorize(']', SYNTAX.PUNCT)
-		])
+			Colorize(']', SYNTAX.PUNCT) ])
 
 	return out
 
 
-func pretty_print_dict(value, depth := 0, indent := "") -> PoolStringArray:
-	var keys := (value as Dictionary).keys()
+func pretty_print_dict(value: Dictionary, depth := 0, indent := "") -> PoolStringArray:
+	var keys := value.keys()
 	var length := keys.size()
 
 	if length == 0:
-		return PoolStringArray([colorize('{ }', SYNTAX.PUNCT)])
+		return PoolStringArray([Colorize('{ }', SYNTAX.PUNCT)])
 
 	if depth > PRETTY_PRINT.DEPTH_LIMIT:
 		return PoolStringArray([
-			colorize('Dictionary', SYNTAX.INTRINSIC),
-			colorize('{', SYNTAX.PUNCT),
-				colorize(String(length), SYNTAX.NUMERIC),
-			colorize('}', SYNTAX.PUNCT)
+				Colorize('Dictionary', SYNTAX.INTRINSIC),
+				Colorize('{', SYNTAX.PUNCT),
+					Colorize(str(length), SYNTAX.NUMERIC),
+				Colorize('}', SYNTAX.PUNCT)
 		])
 
 	var prefix := inc_indent(indent)
 	var postfix := "\n" if PRETTY_PRINT.MULTILINE else ""
 	var key_indent := inc_indent(prefix) if PRETTY_PRINT.MULTILINE else " "
 
-	var out := PoolStringArray()
-
-	#out.push_back(indent)
-
-	out.push_back("%s%s" % [
-				colorize('{', SYNTAX.PUNCT),
-				"\n" if PRETTY_PRINT.MULTILINE else " ",
-			])
+	var out := PoolStringArray([ "%s%s" % [
+			Colorize('{', SYNTAX.PUNCT),
+			"\n" if PRETTY_PRINT.MULTILINE else " ", ] ])
 
 	for i in length:
-		#print('Element #%d' % [ i ])
 		var key = keys[i]
 		var key_str: String
 		var key_str_color = SYNTAX.STRING
@@ -591,7 +645,7 @@ func pretty_print_dict(value, depth := 0, indent := "") -> PoolStringArray:
 				key_str_color = SYNTAX.NUMERIC
 
 			TYPE_STRING:
-				if needs_quot(key):
+				if ReplUtil.NeedsQuot(key):
 					key_str = to_json(key)
 				else:
 					key_str = key
@@ -601,53 +655,43 @@ func pretty_print_dict(value, depth := 0, indent := "") -> PoolStringArray:
 
 		# Push indent + content
 		out.push_back("%s%s%s %s" % [
-					prefix,
-					colorize(key_str, key_str_color),
-					colorize(":", SYNTAX.PUNCT),
-					pretty_print_value(value[key], depth + 1, prefix).lstrip(' \t')
-				])
+				prefix,
+				Colorize(key_str, key_str_color),
+				Colorize(":", SYNTAX.PUNCT),
+				pretty_print_value(value[key], depth + 1, prefix).lstrip(' \t') ])
 
 		# On limit reached
 		if i > PRETTY_PRINT.MAX_ELS and length > i + 1:
 			# Push comma, and etc. symbol
+			var x_more: String = PRETTY_PRINT.FMT.X_MORE % [ length - PRETTY_PRINT.MAX_ELS ]
 			out.push_back("%s%s%s%s%s" % [
-					colorize(',', SYNTAX.PUNCT),
-					postfix, key_indent,
-					colorize(PRETTY_PRINT.FMT.X_MORE % [ length - PRETTY_PRINT.MAX_ELS ], SYNTAX.COMMENT),
-					postfix
-				])
+					Colorize(',', SYNTAX.PUNCT), postfix,
+					key_indent,
+					Colorize(x_more, SYNTAX.COMMENT), postfix ])
 			break
-		# On last reached but not at limit
-		# TODO: Its good practice to place a comma on the last item in #
-		#        a multi-element multi-line declaration, so going to
-		#        add the comma when using multi line mode
-		elif PRETTY_PRINT.MULTILINE or i != length - 1:
-			out.push_back("%s%s" % [
-					colorize(',', SYNTAX.PUNCT),
-					postfix
-				])
 
-	out.push_back("%s%s" % [
-			indent,
-			colorize('}', SYNTAX.PUNCT)
-		])
+		# On last reached but not at limit
+		elif PRETTY_PRINT.MULTILINE or i != length - 1:
+			out.push_back("%s%s" % [ Colorize(',', SYNTAX.PUNCT), postfix ])
+
+	out.push_back("%s%s" % [ indent, Colorize('}', SYNTAX.PUNCT) ])
 
 	return out
 
 
 func pretty_print_classlike(value, depth := 0, indent := "") -> PoolStringArray:
-	# dprint.write('Resolved => Reference | Node | MainLoop', 'pretty_print_value')
+	dprint.debug('Resolved => Reference | Node | MainLoop', 'pretty_print_value')
 
 	if PRETTY_PRINT.SIMPLE_BUILDER:
 		var out := PoolStringArray(["%s%s%s%s:%s%s" % [
 				indent,
-				(colorize(value.get("name"), SYNTAX.TAG)
+				(Colorize(value.get("name"), SYNTAX.TAG)
 						if typeof(value.get("name")) == TYPE_STRING
-						else ""),
-				colorize(fmt.escape('['), SYNTAX.PUNCT),
-					colorize(value.get_class(), SYNTAX.TYPE),
-					colorize(value.get_instance_id(), SYNTAX.NUMERIC * Color(1, 1, 1, 0.7)),
-				colorize(fmt.escape(']'), SYNTAX.PUNCT),
+					else ""),
+				Colorize(fmt.escape('['), SYNTAX.PUNCT),
+				Colorize(value.get_class(), SYNTAX.TYPE),
+				Colorize(value.get_instance_id(), SYNTAX.NUMERIC * Color(1, 1, 1, 0.7)),
+				Colorize(fmt.escape(']'), SYNTAX.PUNCT)
 		]])
 		var node := value as Node
 		# Print first n nodes of tree
@@ -655,14 +699,17 @@ func pretty_print_classlike(value, depth := 0, indent := "") -> PoolStringArray:
 			indent = "\n%s" % [ inc_indent(indent) ]
 			var child_count := node.get_child_count()
 			var count := int(min(child_count, PRETTY_PRINT.MAX_ELS))
+
 			for i in count:
 				out.push_back("%s- %s" % [
 						indent,
-						pretty_print_value(node.get_child(i), depth + 1, "")
-				])
+						pretty_print_value(node.get_child(i), depth + 1, "") ])
+
 			if count < child_count:
-				out.push_back(colorize(indent +
-					PRETTY_PRINT.FMT.X_MORE % [ child_count - count ], SYNTAX.COMMENT))
+				out.push_back(Colorize(
+						indent + PRETTY_PRINT.FMT.X_MORE % [ child_count - count ],
+						SYNTAX.COMMENT))
+
 			return out
 		else:
 			return out
@@ -672,48 +719,47 @@ func pretty_print_classlike(value, depth := 0, indent := "") -> PoolStringArray:
 
 
 func pretty_print_classlike_parse(value, depth := 0, indent := "") -> PoolStringArray:
-		var value_str := "%s" % [ value ]
-		var out_string: String = ""
-		# Get index of non-prefix content (e.g. `[` * `]`)
-		var base_idx := value_str.find('[')
-		# if not found return unstyled value string
-		if base_idx == -1:
-			return PoolStringArray([value_str])
+	var value_str := "%s" % [ value ]
+	var out_string: String = ""
+	# Get index of non-prefix content (e.g. `[` * `]`)
+	var base_idx := value_str.find('[')
+	# If not found return unstyled value string
+	if base_idx == -1:
+		return PoolStringArray([value_str])
 
-		# Get body of base node syntax, minus surrounding brackets
-		var node_base := value_str.substr(base_idx + 1).trim_suffix(']')
-		var prefix := "" if base_idx == 0 else value_str.substr(0, base_idx - 1)
+	# Get body of base node syntax, minus surrounding brackets
+	var node_base := value_str.substr(base_idx + 1).trim_suffix(']')
+	var prefix := "" if base_idx == 0 else value_str.substr(0, base_idx - 1)
 
-		# Attempt to split base node body into type and reference id
-		var base_contents := PoolStringArray()
-		var node_base_id_punct_idx := node_base.find(':')
+	# Attempt to split base node body into type and reference id
+	var base_contents := PoolStringArray()
 
-		if node_base_id_punct_idx == -1:
-			# Treat as single fragment
-			base_contents.push_back(colorize(node_base, SYNTAX.TYPE))
-		else:
-			# Treat as <type> + ':' + <id>
-			# Nothing _should_ need to be escaped here
-			var parts := node_base.split(':')
-			base_contents.push_back(colorize(parts[0], SYNTAX.TYPE))
-			base_contents.push_back(colorize(':',      SYNTAX.PUNCT))
-			base_contents.push_back(colorize(parts[1], SYNTAX.NUMERIC * Color(1, 1, 1, 0.7)))
+	if node_base.find(':') == -1:
+		# Treat as single fragment
+		base_contents.push_back(Colorize(node_base, SYNTAX.TYPE))
+	else:
+		# Treat as <type> + ':' + <id>
+		# Nothing _should_ need to be escaped here
+		var parts := node_base.split(':')
+		base_contents.push_back(Colorize(parts[0], SYNTAX.TYPE))
+		base_contents.push_back(Colorize(':',      SYNTAX.PUNCT))
+		base_contents.push_back(Colorize(parts[1], SYNTAX.NUMERIC * Color(1, 1, 1, 0.7)))
 
 
-		# Build output fragments. Anything beyond simple equality checks and expressions should
-		# remain before this if possible
-		var pool := PoolStringArray()
+	# Build output fragments. Anything beyond simple equality checks and expressions should
+	# remain before this if possible
+	var pool := PoolStringArray()
 
-		# Name/@ prefix content
-		if prefix != "":
-			pool.push_back(colorize(prefix, SYNTAX.TAG))
+	# Name/@ prefix content
+	if prefix != "":
+		pool.push_back(Colorize(prefix, SYNTAX.TAG))
 
-		# Main body
-		pool.push_back(colorize(fmt.escape('['), SYNTAX.PUNCT))
-		pool.append_array(base_contents)
-		pool.push_back(colorize(fmt.escape(']'), SYNTAX.PUNCT))
+	# Main body
+	pool.push_back(Colorize(fmt.escape('['), SYNTAX.PUNCT))
+	pool.append_array(base_contents)
+	pool.push_back(Colorize(fmt.escape(']'), SYNTAX.PUNCT))
 
-		return pool
+	return pool
 
 
 # For type-specific formatting of return values
@@ -725,11 +771,11 @@ func pretty_print_value(value, depth := 0, indent := "") -> String:
 	match typeof(value):
 		TYPE_BOOL, TYPE_NIL:
 			#dprint.write('Resolved => bool | null', 'pretty_print_value')
-			return colorize("%s" % [ value ], SYNTAX.KEYWORD)
+			return Colorize("%s" % [ value ], SYNTAX.KEYWORD)
 
 		TYPE_INT, TYPE_REAL:
 			#dprint.write('Resolved => int | real', 'pretty_print_value')
-			return colorize("%s" % [ value ],
+			return Colorize("%s" % [ value ],
 						SYNTAX.INTRINSIC
 							if (is_inf(value) or is_nan(value))
 						else SYNTAX.NUMERIC
@@ -737,13 +783,14 @@ func pretty_print_value(value, depth := 0, indent := "") -> String:
 
 		TYPE_STRING, TYPE_NODE_PATH:
 			#dprint.write('Resolved => string | NodePath', 'pretty_print_value')
-			return colorize(to_json(value), SYNTAX.STRING)
+			return Colorize(to_json(value), SYNTAX.STRING)
 
 		TYPE_COLOR:
 			#dprint.write('Resolved => Color', 'pretty_print_value')
 			return pretty_print_color(value, depth, indent).join('')
 
 		TYPE_VECTOR2, TYPE_VECTOR3:
+			#dprint.write('Resolved => Vector2 | Vector3', 'pretty_print_value')
 			return pretty_print_vec(value, depth, indent).join('')
 
 		TYPE_ARRAY, TYPE_STRING_ARRAY, TYPE_INT_ARRAY, TYPE_REAL_ARRAY, TYPE_VECTOR2_ARRAY, TYPE_VECTOR3_ARRAY:
@@ -754,17 +801,11 @@ func pretty_print_value(value, depth := 0, indent := "") -> String:
 			#dprint.write('Resolved => Dictionary', 'pretty_print_value')
 			return pretty_print_dict(value, depth, indent).join('')
 
-
 	if (value is Reference) or (value is Node) or (value is MainLoop):
 		return pretty_print_classlike(value, depth, indent).join('')
 
 	dprint.warn('Reached end of resolution logic, failed to get pattern for %s' % [ value ], 'pretty_print_value')
 	return str(value)
-
-
-# Check if string needs to be quoted (e.g. for property names in object literal-likes)
-static func needs_quot(string: String) -> bool:
-	return string.strip_escapes().length() < string.length() or string.find(' ') >= 0
 
 
 #section Handlers

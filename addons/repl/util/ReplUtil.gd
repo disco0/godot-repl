@@ -2,9 +2,32 @@ tool
 class_name ReplUtil
 
 
+const PROPERTY_USED_REGION_FLAGS = PROPERTY_USAGE_GROUP | PROPERTY_USAGE_CATEGORY
+
+
 static func PassInstance(instance, prop, target) -> void:
 	var setter = 'set_%s' % [ prop ]
 	target.call(setter, instance)
+
+
+#region Object Properties
+
+
+static func PropUsageFilter(prop_list: Array, flags: int) -> Array:
+	var filtered = [ ]
+	for prop in prop_list:
+		if (
+			not 'usage' in prop
+			or typeof(prop['usage']) != TYPE_INT
+			or (prop['usage'] & flags) == 0
+		):
+			filtered.push_back(prop)
+
+	return filtered
+
+
+static func PropFilterNonRegion(prop_list: Array) -> Array:
+	return PropUsageFilter(prop_list, PROPERTY_USED_REGION_FLAGS)
 
 
 static func CollectProp(dict_arr: Array, prop: String, filter_str := "") -> PoolStringArray:
@@ -23,8 +46,29 @@ static func CollectProp(dict_arr: Array, prop: String, filter_str := "") -> Pool
 	return pool
 
 
+static func HasItemWithProp(list: Array, prop_name: String, value) -> bool:
+	for item in list:
+		if prop_name in item and item[prop_name] == value:
+			return true
+
+	return false
+
+
+#endregion Object Properties
+
+
+#region Strings
+
+
+# Non-regex method for naively stripping enclosing parens
 static func StripParens(string: String) -> String:
-	return string.strip_edges(true, true).right(1).rstrip(')')
+	return string.strip_edges(true, true).trim_prefix('(').trim_suffix(')')
+	#return string.strip_edges(true, true).right(1).rstrip(')')
+
+
+# Check if string needs to be quoted (e.g. for property names in object literal-likes)
+static func NeedsQuot(string: String) -> bool:
+	return string.find(' ') >= 0 or string.strip_escapes().length() < string.length()
 
 
 static func TypeStringOf(value) -> String:
@@ -75,7 +119,7 @@ const TYPE_ENUMS_UI := [
 	"Vector2",
 	"Rect2",
 	"Vector3",
-	"Transform2d",
+	"Transform2D",
 	"Plane",
 	"Quat",
 	"Aabb",
